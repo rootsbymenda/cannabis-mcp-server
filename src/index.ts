@@ -445,39 +445,47 @@ export class CannabisMCP extends McpAgent<Env> {
 }
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext) {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
-      const id = env.MCP_OBJECT.idFromName("cannabis-mcp");
-      const stub = env.MCP_OBJECT.get(id);
-      return stub.fetch(request);
+    // Health check
+    if (url.pathname === "/" || url.pathname === "/health") {
+      return new Response(
+        JSON.stringify({
+          name: "Two Halves — Cannabis & Controlled Substances Regulatory Intelligence",
+          version: "1.0.0",
+          status: "healthy",
+          tools: [
+            "check_cannabis_testing",
+            "check_controlled_substance",
+            "check_cannabis_compliance",
+            "search_cannabis_regulations",
+          ],
+          data: {
+            cannabis_testing_limits: "1,942 state-level testing requirements",
+            incb_yellow_list: "154 UN scheduled narcotic drugs",
+            eu_drug_precursors: "46 EU controlled precursor chemicals",
+            emcdda_nps: "41 risk-assessed novel psychoactive substances",
+            health_canada_cannabis: "383 Canadian cannabis regulations",
+          },
+          docs: "https://twohalves.ai",
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        }
+      );
     }
 
-    return new Response(
-      JSON.stringify({
-        name: "Two Halves — Cannabis & Controlled Substances Regulatory Intelligence",
-        version: "1.0.0",
-        description:
-          "Cannabis testing limits (18+ US states), UN controlled substance scheduling, EU drug precursors, Health Canada cannabis regulations, and novel psychoactive substance monitoring. Query state-by-state testing requirements, check substance scheduling status, and verify cannabis product compliance across jurisdictions.",
-        mcp_endpoint: "/mcp",
-        tools: [
-          "check_cannabis_testing",
-          "check_controlled_substance",
-          "check_cannabis_compliance",
-          "search_cannabis_regulations",
-        ],
-        data: {
-          cannabis_testing_limits: "1,942 state-level testing requirements",
-          incb_yellow_list: "154 UN scheduled narcotic drugs",
-          eu_drug_precursors: "46 EU controlled precursor chemicals",
-          emcdda_nps: "41 risk-assessed novel psychoactive substances",
-          health_canada_cannabis: "383 Canadian cannabis regulations",
-        },
-      }),
-      {
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+    // SSE transport (legacy clients)
+    if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
+      return CannabisMCP.serveSSE("/sse").fetch(request, env, ctx);
+    }
+
+    // Streamable HTTP transport (new spec)
+    if (url.pathname === "/mcp") {
+      return CannabisMCP.serve("/mcp").fetch(request, env, ctx);
+    }
+
+    return new Response("Not found", { status: 404 });
   },
 };

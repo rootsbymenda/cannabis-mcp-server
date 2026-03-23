@@ -1,7 +1,7 @@
 {
-  "name": "chem-mcp-server",
+  "name": "cannabis-mcp-server",
   "version": "1.0.0",
-  "description": "Chemical Safety & Industrial Regulatory Intelligence MCP Server",
+  "description": "Cannabis Regulatory Intelligence MCP Server — State-level testing limits, UN INCB scheduling, EU drug precursors, Health Canada regulations",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
