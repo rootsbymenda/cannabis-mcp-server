@@ -476,6 +476,22 @@ export default {
       );
     }
 
+    if (url.pathname === "/.well-known/mcp/server-card.json") {
+      return Response.json({
+        "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
+        "version": "1.0",
+        "protocolVersion": "2025-06-18",
+        "serverInfo": { "name": "cannabis-mcp-server", "title": "Two Halves Cannabis & Controlled Substances Regulatory Intelligence", "version": "1.0.0" },
+        "description": "Cannabis regulatory MCP — multi-jurisdiction compliance",
+        "iconUrl": "https://rootsbybenda.com/icon.png",
+        "documentationUrl": "https://rootsbybenda.com",
+        "transport": { "type": "streamable-http", "endpoint": "/mcp" },
+        "capabilities": { "tools": { "listChanged": true }, "resources": { "subscribe": false, "listChanged": false } },
+        "authentication": { "required": false, "schemes": ["bearer"] },
+        "tools": ["dynamic"]
+      }, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
+    }
+
     // SSE transport (legacy clients)
     if (url.pathname === "/sse" || url.pathname.startsWith("/sse/")) {
       return CannabisMCP.serveSSE("/sse").fetch(request, env, ctx);
