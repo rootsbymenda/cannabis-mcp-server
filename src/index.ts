@@ -2,6 +2,11 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+// Escape LIKE special characters in user input to prevent wildcard injection
+function escapeLike(s: string): string {
+  return s.replace(/[%_\\]/g, '\\$&');
+}
+
 const RATE_LIMIT_PER_MINUTE = 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
@@ -29,7 +34,112 @@ function rateLimitResponse(): Response {
 interface Env {
   DB: D1Database;
   MCP_OBJECT: DurableObjectNamespace;
+  // Auth env — optional. When configured, validates Bearer tokens for usage tracking
+  // and per-user rate limiting. Without these, all callers are treated as anonymous free tier.
+  MCP_KEY_SECRET?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
+
+// --- Auth: HMAC-validated MCP key + Supabase plan lookup ---
+// MCP keys are issued by rootsbybenda-site/functions/api/mcp-key.js using the
+// SAME MCP_KEY_SECRET. Format: mcp_<base64url(user_id)>_<sha256_hmac[:32]>.
+// On these public-data servers, auth is for TRACKING and REVOCATION, not tier gating.
+// Unauthenticated callers get full access at free tier.
+
+interface AuthProps extends Record<string, unknown> {
+  tier: "paid" | "free";
+  user_id: string | null;
+  plan: string;
+}
+
+function base64urlDecodeToString(b64url: string): string {
+  const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = b64 + "===".slice((b64.length + 3) % 4);
+  return atob(padded);
+}
+
+async function hmacSha256Hex(message: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function resolveAuth(request: Request, env: Env): Promise<AuthProps> {
+  const authHeader = request.headers.get("Authorization") || "";
+  const match = authHeader.match(/^Bearer\s+(mcp_[A-Za-z0-9_-]+_[a-f0-9]{32})\s*$/i);
+  if (!match) return { tier: "free", user_id: null, plan: "anonymous" };
+
+  const key = match[1];
+  const parts = key.split("_");
+  if (parts.length !== 3 || parts[0] !== "mcp") {
+    return { tier: "free", user_id: null, plan: "anonymous" };
+  }
+  const userIdB64 = parts[1];
+  const providedHmac = parts[2].toLowerCase();
+
+  if (!env.MCP_KEY_SECRET) {
+    console.error("resolveAuth: MCP_KEY_SECRET not configured");
+    return { tier: "free", user_id: null, plan: "anonymous" };
+  }
+
+  let userId: string;
+  try {
+    userId = base64urlDecodeToString(userIdB64);
+  } catch {
+    return { tier: "free", user_id: null, plan: "anonymous" };
+  }
+  if (!userId) return { tier: "free", user_id: null, plan: "anonymous" };
+
+  const computed = (await hmacSha256Hex(userId, env.MCP_KEY_SECRET)).slice(0, 32);
+  if (!constantTimeEqual(computed, providedHmac)) {
+    return { tier: "free", user_id: null, plan: "anonymous" };
+  }
+
+  // Valid HMAC — user is authenticated. Look up plan if Supabase is configured.
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { tier: "free", user_id: userId, plan: "authenticated" };
+  }
+
+  let plan = "free";
+  try {
+    const profileRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan`,
+      {
+        headers: {
+          Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+          apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+        },
+      }
+    );
+    if (profileRes.ok) {
+      const profiles = (await profileRes.json()) as Array<{ plan?: string }>;
+      if (profiles.length > 0 && profiles[0].plan) {
+        plan = profiles[0].plan;
+      }
+    }
+  } catch (e) {
+    console.error("resolveAuth: profile lookup failed", e);
+  }
+
+  return { tier: "free", user_id: userId, plan };
+}
+// --- End auth ---
 
 export class CannabisMCP extends McpAgent<Env> {
   server = new McpServer({
@@ -62,16 +172,16 @@ export class CannabisMCP extends McpAgent<Env> {
           ),
       },
       async ({ state, test_category, analyte }) => {
-        let sql = `SELECT * FROM cannabis_testing_limits WHERE state LIKE ? COLLATE NOCASE`;
-        const params: string[] = [`%${state.trim()}%`];
+        let sql = `SELECT * FROM cannabis_testing_limits WHERE state LIKE ? ESCAPE '\\' COLLATE NOCASE`;
+        const params: string[] = [`%${escapeLike(state.trim())}%`];
 
         if (test_category) {
-          sql += ` AND test_category LIKE ? COLLATE NOCASE`;
-          params.push(`%${test_category.trim()}%`);
+          sql += ` AND test_category LIKE ? ESCAPE '\\' COLLATE NOCASE`;
+          params.push(`%${escapeLike(test_category.trim())}%`);
         }
         if (analyte) {
-          sql += ` AND analyte_name LIKE ? COLLATE NOCASE`;
-          params.push(`%${analyte.trim()}%`);
+          sql += ` AND analyte_name LIKE ? ESCAPE '\\' COLLATE NOCASE`;
+          params.push(`%${escapeLike(analyte.trim())}%`);
         }
         sql += ` ORDER BY test_category, analyte_name LIMIT 100`;
 
@@ -127,35 +237,36 @@ export class CannabisMCP extends McpAgent<Env> {
       },
       async ({ query }) => {
         const q = query.trim();
+        const qEsc = escapeLike(q);
 
         // Check INCB Yellow List (narcotic drugs)
         const incb = await this.env.DB.prepare(
           `SELECT * FROM incb_yellow_list
-           WHERE substance_name LIKE ? COLLATE NOCASE
-              OR synonyms LIKE ? COLLATE NOCASE
+           WHERE substance_name LIKE ? ESCAPE '\\' COLLATE NOCASE
+              OR synonyms LIKE ? ESCAPE '\\' COLLATE NOCASE
               OR cas_number = ?
            LIMIT 5`
         )
-          .bind(`%${q}%`, `%${q}%`, q)
+          .bind(`%${qEsc}%`, `%${qEsc}%`, q)
           .all();
 
         // Check EU Drug Precursors
         const precursor = await this.env.DB.prepare(
           `SELECT * FROM eu_drug_precursors
-           WHERE substance_name LIKE ? COLLATE NOCASE
+           WHERE substance_name LIKE ? ESCAPE '\\' COLLATE NOCASE
               OR cas_number = ?
            LIMIT 5`
         )
-          .bind(`%${q}%`, q)
+          .bind(`%${qEsc}%`, q)
           .all();
 
         // Check EMCDDA NPS
         const nps = await this.env.DB.prepare(
           `SELECT * FROM emcdda_nps
-           WHERE substance_name LIKE ? COLLATE NOCASE
+           WHERE substance_name LIKE ? ESCAPE '\\' COLLATE NOCASE
            LIMIT 5`
         )
-          .bind(`%${q}%`)
+          .bind(`%${qEsc}%`)
           .all();
 
         const hasResults =
@@ -247,8 +358,9 @@ export class CannabisMCP extends McpAgent<Env> {
           let sql = `SELECT * FROM health_canada_cannabis WHERE 1=1`;
           const params: string[] = [];
           if (product_class) {
-            sql += ` AND (product_class LIKE ? COLLATE NOCASE OR category LIKE ? COLLATE NOCASE)`;
-            params.push(`%${product_class}%`, `%${product_class}%`);
+            sql += ` AND (product_class LIKE ? ESCAPE '\\' COLLATE NOCASE OR category LIKE ? ESCAPE '\\' COLLATE NOCASE)`;
+            const pcEsc = escapeLike(product_class);
+            params.push(`%${pcEsc}%`, `%${pcEsc}%`);
           }
           sql += ` ORDER BY category, analyte_or_parameter LIMIT 100`;
 
@@ -288,11 +400,12 @@ export class CannabisMCP extends McpAgent<Env> {
           text += `*${results.length} regulations found*`;
         } else {
           // US State
-          let sql = `SELECT * FROM cannabis_testing_limits WHERE state LIKE ? COLLATE NOCASE`;
-          const params: string[] = [`%${j}%`];
+          let sql = `SELECT * FROM cannabis_testing_limits WHERE state LIKE ? ESCAPE '\\' COLLATE NOCASE`;
+          const jEsc = escapeLike(j);
+          const params: string[] = [`%${jEsc}%`];
           if (product_class) {
-            sql += ` AND product_type LIKE ? COLLATE NOCASE`;
-            params.push(`%${product_class}%`);
+            sql += ` AND product_type LIKE ? ESCAPE '\\' COLLATE NOCASE`;
+            params.push(`%${escapeLike(product_class)}%`);
           }
           sql += ` ORDER BY test_category, analyte_name LIMIT 150`;
 
@@ -358,18 +471,19 @@ export class CannabisMCP extends McpAgent<Env> {
       },
       async ({ query }) => {
         const q = query.trim();
+        const qEsc = escapeLike(q);
         let text = `## Search Results: "${query}"\n\n`;
         let totalResults = 0;
 
         // Search cannabis testing limits
         const testing = await this.env.DB.prepare(
           `SELECT * FROM cannabis_testing_limits
-           WHERE analyte_name LIKE ? COLLATE NOCASE
-              OR test_category LIKE ? COLLATE NOCASE
-              OR notes LIKE ? COLLATE NOCASE
+           WHERE analyte_name LIKE ? ESCAPE '\\' COLLATE NOCASE
+              OR test_category LIKE ? ESCAPE '\\' COLLATE NOCASE
+              OR notes LIKE ? ESCAPE '\\' COLLATE NOCASE
            ORDER BY state, test_category LIMIT 50`
         )
-          .bind(`%${q}%`, `%${q}%`, `%${q}%`)
+          .bind(`%${qEsc}%`, `%${qEsc}%`, `%${qEsc}%`)
           .all();
 
         if (testing.results && testing.results.length > 0) {
@@ -397,11 +511,11 @@ export class CannabisMCP extends McpAgent<Env> {
         // Search INCB
         const incb = await this.env.DB.prepare(
           `SELECT * FROM incb_yellow_list
-           WHERE substance_name LIKE ? COLLATE NOCASE
-              OR synonyms LIKE ? COLLATE NOCASE
+           WHERE substance_name LIKE ? ESCAPE '\\' COLLATE NOCASE
+              OR synonyms LIKE ? ESCAPE '\\' COLLATE NOCASE
            LIMIT 20`
         )
-          .bind(`%${q}%`, `%${q}%`)
+          .bind(`%${qEsc}%`, `%${qEsc}%`)
           .all();
 
         if (incb.results && incb.results.length > 0) {
@@ -416,11 +530,11 @@ export class CannabisMCP extends McpAgent<Env> {
         // Search Health Canada
         const hc = await this.env.DB.prepare(
           `SELECT * FROM health_canada_cannabis
-           WHERE analyte_or_parameter LIKE ? COLLATE NOCASE
-              OR category LIKE ? COLLATE NOCASE
+           WHERE analyte_or_parameter LIKE ? ESCAPE '\\' COLLATE NOCASE
+              OR category LIKE ? ESCAPE '\\' COLLATE NOCASE
            LIMIT 20`
         )
-          .bind(`%${q}%`, `%${q}%`)
+          .bind(`%${qEsc}%`, `%${qEsc}%`)
           .all();
 
         if (hc.results && hc.results.length > 0) {
@@ -435,10 +549,10 @@ export class CannabisMCP extends McpAgent<Env> {
         // Search precursors
         const prec = await this.env.DB.prepare(
           `SELECT * FROM eu_drug_precursors
-           WHERE substance_name LIKE ? COLLATE NOCASE
+           WHERE substance_name LIKE ? ESCAPE '\\' COLLATE NOCASE
            LIMIT 10`
         )
-          .bind(`%${q}%`)
+          .bind(`%${qEsc}%`)
           .all();
 
         if (prec.results && prec.results.length > 0) {
@@ -472,10 +586,15 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    const clientIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
+    // Resolve auth early — use user_id for rate limiting when authenticated (better for shared IPs)
+    let auth: AuthProps | null = null;
     const isDataEndpoint = url.pathname === "/mcp" || url.pathname === "/sse" || url.pathname.startsWith("/sse/") || (request.method === "POST" && url.pathname === "/");
-    if (isDataEndpoint && !checkRateLimit(clientIp)) {
-      return rateLimitResponse();
+    if (isDataEndpoint) {
+      auth = await resolveAuth(request, env);
+      const rateLimitKey = auth.user_id || request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
+      if (!checkRateLimit(rateLimitKey)) {
+        return rateLimitResponse();
+      }
     }
 
     // Health check
@@ -517,10 +636,16 @@ export default {
         "documentationUrl": "https://rootsbybenda.com",
         "transport": { "type": "streamable-http", "endpoint": "/mcp" },
         "capabilities": { "tools": { "listChanged": true }, "resources": { "subscribe": false, "listChanged": false } },
-        "authentication": { "required": false, "schemes": ["bearer"] },
-        "rateLimit": { "requestsPerMinute": 60, "enforcement": "per-ip" },
+        "authentication": { "required": false, "schemes": ["bearer"], "note": "Optional API key enables higher rate limits and usage tracking" },
+        "rateLimit": { "requestsPerMinute": 60, "enforcement": "per-ip-or-user" },
         "tools": ["dynamic"]
       }, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
+    }
+
+    // Resolve auth and set on ctx.props for MCP transport endpoints
+    if (url.pathname === "/sse" || url.pathname.startsWith("/sse/") || url.pathname === "/mcp") {
+      if (!auth) auth = await resolveAuth(request, env);
+      (ctx as ExecutionContext & { props?: AuthProps }).props = auth;
     }
 
     // SSE transport (legacy clients)
