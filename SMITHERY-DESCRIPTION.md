@@ -27,4 +27,4 @@ Full-text search across all cannabis regulatory databases — testing limits, co
 | Health Canada Cannabis | 383 | Health Canada |
 | **Total** | **2,566** | |
 
-## Built by Two Halves — twohalves.ai
+## Built by Roots by Benda — rootsbybenda.com

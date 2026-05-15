@@ -34,23 +34,17 @@ function rateLimitResponse(): Response {
 interface Env {
   DB: D1Database;
   MCP_OBJECT: DurableObjectNamespace;
-  // Auth env — optional. When configured, validates Bearer tokens for usage tracking
-  // and per-user rate limiting. Without these, all callers are treated as anonymous free tier.
+  // Optional auth env. When configured, validates Bearer tokens for per-user rate limiting.
   MCP_KEY_SECRET?: string;
-  SUPABASE_URL?: string;
-  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
-// --- Auth: HMAC-validated MCP key + Supabase plan lookup ---
+// --- Auth: HMAC-validated MCP key ---
 // MCP keys are issued by rootsbybenda-site/functions/api/mcp-key.js using the
 // SAME MCP_KEY_SECRET. Format: mcp_<base64url(user_id)>_<sha256_hmac[:32]>.
-// On these public-data servers, auth is for TRACKING and REVOCATION, not tier gating.
-// Unauthenticated callers get full access at free tier.
 
 interface AuthProps extends Record<string, unknown> {
-  tier: "paid" | "free";
   user_id: string | null;
-  plan: string;
+  authenticated: boolean;
 }
 
 function base64urlDecodeToString(b64url: string): string {
@@ -83,67 +77,42 @@ function constantTimeEqual(a: string, b: string): boolean {
 async function resolveAuth(request: Request, env: Env): Promise<AuthProps> {
   const authHeader = request.headers.get("Authorization") || "";
   const match = authHeader.match(/^Bearer\s+(mcp_[A-Za-z0-9_-]+_[a-f0-9]{32})\s*$/i);
-  if (!match) return { tier: "free", user_id: null, plan: "anonymous" };
+  if (!match) return { user_id: null, authenticated: false };
 
   const key = match[1];
   const parts = key.split("_");
   if (parts.length !== 3 || parts[0] !== "mcp") {
-    return { tier: "free", user_id: null, plan: "anonymous" };
+    return { user_id: null, authenticated: false };
   }
   const userIdB64 = parts[1];
   const providedHmac = parts[2].toLowerCase();
 
   if (!env.MCP_KEY_SECRET) {
     console.error("resolveAuth: MCP_KEY_SECRET not configured");
-    return { tier: "free", user_id: null, plan: "anonymous" };
+    return { user_id: null, authenticated: false };
   }
 
   let userId: string;
   try {
     userId = base64urlDecodeToString(userIdB64);
   } catch {
-    return { tier: "free", user_id: null, plan: "anonymous" };
+    return { user_id: null, authenticated: false };
   }
-  if (!userId) return { tier: "free", user_id: null, plan: "anonymous" };
+  if (!userId) return { user_id: null, authenticated: false };
 
   const computed = (await hmacSha256Hex(userId, env.MCP_KEY_SECRET)).slice(0, 32);
   if (!constantTimeEqual(computed, providedHmac)) {
-    return { tier: "free", user_id: null, plan: "anonymous" };
+    return { user_id: null, authenticated: false };
   }
 
-  // Valid HMAC — user is authenticated. Look up plan if Supabase is configured.
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
-    return { tier: "free", user_id: userId, plan: "authenticated" };
-  }
-
-  let plan = "free";
-  try {
-    const profileRes = await fetch(
-      `${env.SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=plan`,
-      {
-        headers: {
-          Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-          apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-        },
-      }
-    );
-    if (profileRes.ok) {
-      const profiles = (await profileRes.json()) as Array<{ plan?: string }>;
-      if (profiles.length > 0 && profiles[0].plan) {
-        plan = profiles[0].plan;
-      }
-    }
-  } catch (e) {
-    console.error("resolveAuth: profile lookup failed", e);
-  }
-
-  return { tier: "free", user_id: userId, plan };
+  return { user_id: userId, authenticated: true };
 }
 // --- End auth ---
 
 export class CannabisMCP extends McpAgent<Env> {
+  // @ts-expect-error agents bundles its own MCP SDK copy; runtime server shape is compatible.
   server = new McpServer({
-    name: "twohalves-cannabis-regulatory",
+    name: "roots-cannabis-regulatory",
     version: "1.0.0",
   });
 
@@ -601,7 +570,7 @@ export default {
     if (url.pathname === "/" || url.pathname === "/health") {
       return new Response(
         JSON.stringify({
-          name: "Two Halves — Cannabis & Controlled Substances Regulatory Intelligence",
+          name: "Roots by Benda — Cannabis & Controlled Substances Regulatory Intelligence",
           version: "1.0.0",
           status: "healthy",
           tools: [
@@ -617,7 +586,7 @@ export default {
             emcdda_nps: "41 risk-assessed novel psychoactive substances",
             health_canada_cannabis: "383 Canadian cannabis regulations",
           },
-          docs: "https://twohalves.ai",
+          docs: "https://rootsbybenda.com",
         }),
         {
           headers: { "Content-Type": "application/json" },
@@ -630,13 +599,13 @@ export default {
         "$schema": "https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json",
         "version": "1.0",
         "protocolVersion": "2025-06-18",
-        "serverInfo": { "name": "cannabis-mcp-server", "title": "Two Halves Cannabis & Controlled Substances Regulatory Intelligence", "version": "1.0.0" },
+        "serverInfo": { "name": "cannabis-mcp-server", "title": "Roots by Benda Cannabis & Controlled Substances Regulatory Intelligence", "version": "1.0.0" },
         "description": "Cannabis regulatory MCP — multi-jurisdiction compliance",
         "iconUrl": "https://rootsbybenda.com/icon.png",
         "documentationUrl": "https://rootsbybenda.com",
         "transport": { "type": "streamable-http", "endpoint": "/mcp" },
         "capabilities": { "tools": { "listChanged": true }, "resources": { "subscribe": false, "listChanged": false } },
-        "authentication": { "required": false, "schemes": ["bearer"], "note": "Optional API key enables higher rate limits and usage tracking" },
+        "authentication": { "required": false, "schemes": ["bearer"], "note": "Optional API key enables per-user rate limiting" },
         "rateLimit": { "requestsPerMinute": 60, "enforcement": "per-ip-or-user" },
         "tools": ["dynamic"]
       }, { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=300" } });
