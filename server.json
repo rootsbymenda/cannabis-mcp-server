@@ -1,0 +1,24 @@
+{
+  "$schema": "https://registry.modelcontextprotocol.io/schema/server.json",
+  "name": "com.rootsbybenda/cannabis-regulatory",
+  "description": "Cannabis and controlled substances regulatory intelligence. US state-level testing limits by category and analyte. UN INCB scheduling, EU drug precursors, EMCDDA novel psychoactive substances, Health Canada cannabis regulations. The only MCP with programmatic US state testing limit lookups. Free. Source-linked.",
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://cannabis-mcp-server.rootsbybenda.workers.dev/mcp"
+    },
+    {
+      "type": "sse",
+      "url": "https://cannabis-mcp-server.rootsbybenda.workers.dev/sse"
+    }
+  ],
+  "tools": [
+    { "name": "check_cannabis_testing", "description": "US state testing limits by category (pesticide/heavy metal/microbial/potency) and analyte. Returns action levels, units, product categories, and regulation references." },
+    { "name": "check_controlled_substance", "description": "INCB Yellow List scheduling, EU drug precursors, and EMCDDA risk-assessed novel psychoactive substances lookup." },
+    { "name": "check_cannabis_compliance", "description": "Per-jurisdiction compliance summary (US states + Health Canada) by product class. Testing requirements, limits, and regulation sections." },
+    { "name": "search_cannabis_regulations", "description": "Cross-source search across cannabis testing limits, INCB scheduling, Health Canada regulations, and EU precursor records." }
+  ],
+  "homepage": "https://rootsbybenda.com",
+  "contact": "SBD@effortlessai.ai"
+}

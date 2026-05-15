@@ -1,6 +1,19 @@
+description: >-
+  What are California testing limits for cannabis edibles? Roots by Benda checks 1,942 US state-level cannabis testing requirements, 154 UN scheduled narcotic drugs, 46 EU controlled precursor chemicals, 41 EMCDDA/EUDA novel psychoactive substances, and 383 Health Canada cannabis rules. Cannabis compliance across US state testing limits, UN scheduling, Health Canada, and EU precursors in one free MCP. Ask your AI: 'what are California testing limits for cannabis edibles?'. Built by one human + Claude. Free. Source-linked.
 startCommand:
   type: "http"
   configSchema:
     type: "object"
-    properties: {}
+    properties:
+      rootsApiKey:
+        type: "string"
+        title: "Roots API Key"
+        description: "Optional. Supplies a stable user_id for per-user rate limiting; all tools return full data without monetization gates."
+        x-from: "header"
+        x-to:
+          header: "Authorization"
+          prefix: "Bearer "
+    additionalProperties: false
+  exampleConfig:
+    rootsApiKey: "mcp_xxxxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
   deploymentUrl: "https://cannabis-mcp-server.rootsbybenda.workers.dev"
