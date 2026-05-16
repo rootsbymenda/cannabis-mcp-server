@@ -228,7 +228,7 @@ const SOURCE = "Roots by Benda \u2014 rootsbybenda.com";
 const CONTACT = "SBD@effortlessai.ai";
 const SERVER_NAME = "Roots by Benda \u2014 Cannabis Intelligence";
 const SERVER_DESCRIPTION =
-  "Roots by Benda answers cannabis compliance questions such as California testing limits for edibles by checking 1,942 US state-level testing requirements, 154 UN scheduled narcotic drugs, 46 EU controlled precursors, 41 EMCDDA/EUDA novel psychoactive substances, and 383 Health Canada cannabis rules. It is a free, source-linked cannabis compliance MCP for testing limits, controlled-substance scheduling, Health Canada rules, and EU precursor review; ask your AI: 'what are California testing limits for cannabis edibles?'.";
+  "Check cannabis compliance across state testing, INCB, Health Canada, and EU precursors.";
 const DATA_CATALOG = {
   cannabis_testing_limits: "1,942 state-level testing requirements",
   incb_yellow_list: "154 UN scheduled narcotic drugs",
@@ -239,19 +239,19 @@ const DATA_CATALOG = {
 const TOOL_CATALOG = [
   {
     name: "check_cannabis_testing",
-    description: "Look up cannabis testing limits by US state, test category, product type, or analyte. Returns pesticide, heavy metal, microbial, solvent, mycotoxin, potency, moisture, action-level, unit, and regulation-reference data."
+    description: "Check cannabis testing limits by US state, test category, and optional analyte. Use when the user asks for pesticide, heavy metal, microbial, solvent, mycotoxin, potency, moisture, or action-level requirements for cannabis products in a specific state. Do not use for controlled-substance scheduling, Health Canada product compliance, EU precursor checks, non-cannabis food pesticide MRLs, or broad keyword discovery. The response includes testing categories, analyte names, action levels, units, product classes, jurisdiction notes, and regulation references."
   },
   {
     name: "check_controlled_substance",
-    description: "Check whether a substance is controlled or scheduled under UN INCB narcotic schedules, EU drug-precursor controls, or EMCDDA/EUDA novel psychoactive-substance monitoring. Returns schedules, categories, synonyms, CAS numbers, and regulatory notes."
+    description: "Check controlled-substance status by substance name or CAS number across UN, EU, and NPS sources. Use when the user asks whether cannabis, THC, morphine, pseudoephedrine, a precursor, or another substance is scheduled, controlled, monitored, or listed by INCB, EU precursor rules, or EMCDDA/EUDA. Do not use for state cannabis lab testing limits, product-class compliance summaries, food/pharma safety, or generic cannabis keyword searches. The response includes schedules, categories, synonyms, CAS numbers, source datasets, and regulatory notes."
   },
   {
     name: "check_cannabis_compliance",
-    description: "Check cannabis product compliance requirements for a US state or Health Canada product class. Returns jurisdiction-specific testing categories, analyte limits, product classes, units, and regulation sections."
+    description: "Check cannabis product compliance requirements for a US state or Health Canada jurisdiction. Use when the user asks what testing categories, product classes, analyte limits, or regulatory sections apply to flower, concentrates, edibles, topicals, extracts, oils, or dried cannabis. Do not use for individual controlled-substance scheduling, pesticide MRLs outside cannabis, broad keyword search, or a single analyte lookup without a jurisdiction. The response includes jurisdiction-specific product classes, required testing categories, analyte limits, units, and regulation sections."
   },
   {
     name: "search_cannabis_regulations",
-    description: "Search cannabis and controlled-substance regulatory data by keyword. Use for broad discovery across state testing limits, Health Canada cannabis rules, UN scheduling, EU precursors, and novel psychoactive substances."
+    description: "Search cannabis and controlled-substance regulatory datasets by keyword. Use when the user needs broad discovery across US state testing limits, Health Canada rules, UN scheduling, EU precursors, or EMCDDA/EUDA novel psychoactive substances before selecting a precise compliance or scheduling tool. Do not use for known state testing lookups, exact controlled-substance status checks, or product-class compliance summaries when structured parameters are available. The response includes cross-source matches with dataset labels, jurisdictions, substance or analyte names, product classes, snippets, and regulatory references."
   }
 ];
 
@@ -286,13 +286,13 @@ export class CannabisMCP extends McpAgent<Env> {
         state: z
           .enum(US_STATES)
           .describe(
-            "US state name (e.g. 'California', 'Colorado', 'Oregon')"
+            "US state name for cannabis testing-limit lookup (e.g. 'California', 'Colorado', 'Oregon'). Use the state where the cannabis product is tested or sold because action levels vary by jurisdiction."
           ),
         test_category: z
           .enum(CANNABIS_TEST_CATEGORIES)
           .optional()
           .describe(
-            "Optional test category filter: pesticide, heavy_metal, microbial, solvent, mycotoxin, potency, moisture"
+            "Optional cannabis laboratory testing category filter. Use pesticide, heavy_metal, microbial, solvent, mycotoxin, potency, or moisture when the user asks about a specific contaminant or assay class."
           ),
         analyte: z
           .string()
@@ -301,7 +301,7 @@ export class CannabisMCP extends McpAgent<Env> {
           .max(MAX_NAME_LENGTH)
           .optional()
           .describe(
-            "Optional specific analyte name (e.g. 'lead', 'arsenic', 'Salmonella', 'butane')"
+            "Optional specific cannabis testing analyte or contaminant name (e.g. 'lead', 'arsenic', 'Salmonella', 'butane'). Use analyte names to narrow a state/category lookup to one action level."
           ),
       },
       async ({ state, test_category, analyte }) => {
@@ -370,7 +370,7 @@ export class CannabisMCP extends McpAgent<Env> {
           .min(1)
           .max(MAX_QUERY_INPUT_LENGTH)
           .describe(
-            "Substance name or CAS number (e.g. 'morphine', 'cannabis', '64-17-5')"
+            "Controlled substance common name, cannabinoid, narcotic drug, precursor chemical, NPS name, synonym, or CAS number (e.g. 'morphine', 'cannabis', '64-17-5'). Use CAS when available for exact matching across INCB, EU precursor, and EMCDDA/EUDA records."
           ),
       },
       async ({ query }) => {
@@ -479,13 +479,13 @@ export class CannabisMCP extends McpAgent<Env> {
         jurisdiction: z
           .enum(CANNABIS_JURISDICTIONS)
           .describe(
-            "Jurisdiction: a US state name (e.g. 'California') or 'Canada' for Health Canada regulations"
+            "Cannabis compliance jurisdiction: a US state name (e.g. 'California') or 'Canada' for Health Canada cannabis regulations. Choose the market where the product will be tested, sold, or assessed."
           ),
         product_class: z
           .enum(CANNABIS_PRODUCT_CLASSES)
           .optional()
           .describe(
-            "Optional product class: flower, concentrate, edible, topical, extract, oil, dried_cannabis"
+            "Optional cannabis product class for compliance filtering. Use flower, concentrate, edible, topical, extract, oil, or dried_cannabis when requirements differ by product format."
           ),
       },
       async ({ jurisdiction, product_class }) => {
@@ -608,7 +608,7 @@ export class CannabisMCP extends McpAgent<Env> {
           .min(1)
           .max(MAX_QUERY_INPUT_LENGTH)
           .describe(
-            "Search term (e.g. 'THC', 'pesticide', 'heavy metal', 'Salmonella', 'morphine', 'pseudoephedrine')"
+            "Cannabis regulatory keyword, jurisdiction, product class, analyte, controlled substance, precursor, or NPS term (e.g. 'THC', 'pesticide', 'heavy metal', 'Salmonella', 'morphine', 'pseudoephedrine'). Use broad terms for discovery across multiple cannabis and controlled-substance datasets."
           ),
       },
       async ({ query }) => {
