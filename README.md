@@ -13,9 +13,12 @@ No equivalent consolidated cross-jurisdiction cannabis compliance MCP exists. Th
 Look up cannabis testing limits by US state, test category, product type, or analyte. Returns pesticide, heavy metal, microbial, solvent, mycotoxin, potency, moisture, action-level, unit, and regulation-reference data.
 
 ```
-query: "California edibles pesticides"
-→ 66 analytes tested; Myclobutanil action level: 0.1 ppm; Bifenazate: 0.1 ppm;
-  Regulation: BPC §5719; Category: inhalable/other distinction applies
+state: "California", test_category: "heavy_metal"
+→ Arsenic: 0.2 µg/g (inhalable), 1.5 µg/g (non-inhalable) — CA DCC 4 CCR §15723
+  Cadmium: 0.2 µg/g (inhalable), 0.5 µg/g (non-inhalable)
+  Lead: 0.5 µg/g (both categories)
+  Mercury: 0.1 µg/g (inhalable), 3.0 µg/g (non-inhalable)
+  8 limits found, all regulation-referenced
 ```
 
 ### `check_controlled_substance`
@@ -31,16 +34,18 @@ query: "psilocybin"
 Check cannabis product compliance requirements for a US state or Health Canada product class. Returns jurisdiction-specific testing categories, analyte limits, product classes, units, and regulation sections.
 
 ```
-query: "Colorado concentrate"
-→ Testing required: potency, residual solvents (butane ≤5000 ppm, propane ≤5000 ppm),
-  heavy metals (Pb ≤0.5 ppm), microbials, mycotoxins; Regulation: 1 CCR 212-3
+jurisdiction: "Colorado", product_class: "concentrate"
+→ Testing required: potency, residual solvents, heavy metals, microbials, mycotoxins
+  Per-analyte limits with regulation references (1 CCR 212-3)
 ```
 
 ### `search_cannabis_regulations`
 Search cannabis and controlled-substance regulatory data by keyword. Use for broad discovery across state testing limits, Health Canada cannabis rules, UN scheduling, EU precursors, and novel psychoactive substances.
 
 ```
-query: "heavy metal flower" → matches across CA, CO, OR, WA state testing limits for Pb, Cd, As, Hg
+query: "heavy metal"
+→ matches across CA, CO, OR, WA state testing limits for Lead, Cadmium, Arsenic, Mercury
+  with action levels, units, and product-type distinctions per jurisdiction
 ```
 
 ## Data
