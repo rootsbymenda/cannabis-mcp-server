@@ -1,5 +1,7 @@
 # Roots by Benda — Cannabis Regulatory Intelligence MCP Server
 
+[![smithery badge](https://smithery.ai/badge/twohalves/cannabis-regulatory)](https://smithery.ai/servers/twohalves/cannabis-regulatory)
+
 **Cannabis testing requirements, controlled substance scheduling, and compliance data in one MCP.** Check US state-level testing limits (pesticides, heavy metals, microbials, solvents, potency), UN/EU controlled substance schedules, Health Canada cannabis rules, and novel psychoactive substance monitoring — all source-linked and free.
 
 No equivalent consolidated cross-jurisdiction cannabis compliance MCP exists. This is the first.
