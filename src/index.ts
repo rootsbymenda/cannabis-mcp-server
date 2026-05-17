@@ -2,6 +2,12 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+const READ_ONLY_TOOL_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  openWorldHint: false,
+} as const;
+
 // Escape LIKE special characters in user input to prevent wildcard injection
 function escapeLike(s: string): string {
   return s.replace(/[%_\\]/g, '\\$&');
@@ -304,6 +310,7 @@ export class CannabisMCP extends McpAgent<Env> {
             "Optional specific cannabis testing analyte or contaminant name (e.g. 'lead', 'arsenic', 'Salmonella', 'butane'). Use analyte names to narrow a state/category lookup to one action level."
           ),
       },
+      READ_ONLY_TOOL_ANNOTATIONS,
       async ({ state, test_category, analyte }) => {
         let sql = `SELECT * FROM cannabis_testing_limits WHERE state LIKE ? ESCAPE '\\' COLLATE NOCASE`;
         const params: (string | number)[] = [likePattern(state)];
@@ -373,6 +380,7 @@ export class CannabisMCP extends McpAgent<Env> {
             "Controlled substance common name, cannabinoid, narcotic drug, precursor chemical, NPS name, synonym, or CAS number (e.g. 'morphine', 'cannabis', '64-17-5'). Use CAS when available for exact matching across INCB, EU precursor, and EMCDDA/EUDA records."
           ),
       },
+      READ_ONLY_TOOL_ANNOTATIONS,
       async ({ query }) => {
         const q = normalizeQuery(query);
         const pattern = likePattern(q);
@@ -488,6 +496,7 @@ export class CannabisMCP extends McpAgent<Env> {
             "Optional cannabis product class for compliance filtering. Use flower, concentrate, edible, topical, extract, oil, or dried_cannabis when requirements differ by product format."
           ),
       },
+      READ_ONLY_TOOL_ANNOTATIONS,
       async ({ jurisdiction, product_class }) => {
         const j = jurisdiction;
         let text = `## Cannabis Compliance — ${sanitizeMarkdown(j)}\n\n`;
@@ -611,6 +620,7 @@ export class CannabisMCP extends McpAgent<Env> {
             "Cannabis regulatory keyword, jurisdiction, product class, analyte, controlled substance, precursor, or NPS term (e.g. 'THC', 'pesticide', 'heavy metal', 'Salmonella', 'morphine', 'pseudoephedrine'). Use broad terms for discovery across multiple cannabis and controlled-substance datasets."
           ),
       },
+      READ_ONLY_TOOL_ANNOTATIONS,
       async ({ query }) => {
         const q = normalizeQuery(query);
         const pattern = likePattern(q);
